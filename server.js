@@ -1,74 +1,61 @@
-const express = require("express");
-const cors = require("cors");
-require("dotenv").config();
-const OpenAI = require("openai");
+// server.js
+import express from "express";
+import cors from "cors";
+import bodyParser from "body-parser";
+import OpenAI from "openai";
 
 const app = express();
-app.use(cors());
-app.use(express.json());
 
-// API Key
-const OPENAI_KEY = process.env.OPENAI_API_KEY;
-if (!OPENAI_KEY) {
-  console.warn("Warning: OPENAI_API_KEY is missing.");
+// ====== CONFIG ======
+const PORT = process.env.PORT || 8080;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+if (!OPENAI_API_KEY) {
+  console.error("Error: OPENAI_API_KEY environment variable is missing!");
+  process.exit(1);
 }
 
-// OpenAI Client
-const client = new OpenAI({
-  apiKey: OPENAI_KEY
-});
+// ====== CORS ======
+app.use(cors({
+  origin: "https://isaxvillain-max.github.io", // allow your frontend
+  methods: ["POST", "GET"],
+  allowedHeaders: ["Content-Type"]
+}));
 
-// POST: getAIReply
+app.use(bodyParser.json());
+
+// ====== OpenAI Client ======
+const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+
+// ====== ROUTES ======
 app.post("/getAIReply", async (req, res) => {
   try {
-    const { text, session = [], emotion_flag = false } = req.body || {};
-    if (!text) {
-      return res.json({ reply: "I’m here with you. You can share anything you feel comfortable sharing." });
-    }
+    const { text, session, emotion_flag } = req.body;
 
-    // System prompt: soft, safe, supportive
-    const systemPrompt = `
-You are a gentle, calm, supportive emotional assistant.
-You help users with stress, sadness, loneliness, anxiety, overthinking, emotional pain, or confusion.
-You are NOT a medical professional.
-You never give medical instructions or harmful advice.
-If a user expresses dangerous feelings, encourage them to reach out to a trusted person or emergency help.
-Keep replies short, warm, and supportive.
-Use simple language and friendly emotional tone.
-`;
+    // Build context for AI
+    let context = "";
+    session.forEach(pair => {
+      context += `User: ${pair.user}\nAI: ${pair.ai}\n`;
+    });
+    context += `User: ${text}\nAI:`;
 
-    // Build message array
-    const messages = [{ role: "system", content: systemPrompt }];
-
-    // Add conversation history (last 6 exchanges)
-    for (const pair of session.slice(-6)) {
-      if (pair.user) messages.push({ role: "user", content: pair.user });
-      if (pair.ai) messages.push({ role: "assistant", content: pair.ai });
-    }
-
-    // Emotion flag
-    const userMessage = emotion_flag ? `(emotionally upset) ${text}` : text;
-    messages.push({ role: "user", content: userMessage });
-
-    // OpenAI API call (new SDK)
-    const completion = await client.chat.completions.create({
-      model: "gpt-4.1-mini",
-      messages,
+    const response = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [{ role: "user", content: context }],
       temperature: 0.7,
-      max_tokens: 300
+      max_tokens: 200
     });
 
-    const reply = completion.choices[0].message.content.trim();
-    return res.json({ reply });
+    const aiReply = response.choices[0].message.content.trim();
+    res.json({ reply: aiReply });
 
   } catch (err) {
-    console.error("Error in /getAIReply:", err);
-    return res.json({
-      reply: "I'm still here for you. Maybe you can share a little more about what's going on?"
-    });
+    console.error("OpenAI error:", err);
+    res.json({ reply: "I am here to listen. Could you say that again?" });
   }
 });
 
-// Server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// ====== START SERVER ======
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
